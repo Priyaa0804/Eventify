@@ -29,6 +29,16 @@ class MeView(generics.RetrieveAPIView):
         return self.request.user
 
 
+class DeactivateAccountView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        user.is_active = False
+        user.save()
+        return Response({"detail": "Your account has been deactivated."}, status=http_status.HTTP_200_OK)
+
+
 class VenueListCreateView(generics.ListCreateAPIView):
     queryset = Venue.objects.filter(is_active=True)
     serializer_class = VenueSerializer
@@ -92,7 +102,7 @@ class ApproveEventView(APIView):
                 event_request=event, approver=request.user,
                 stage='FACULTY', action='APPROVED'
             )
-            hod = User.objects.filter(role='HOD', department=event.club.department).first()
+            hod = event.club.hod
             event.status = 'PENDING_HOD'
             event.current_approver = hod
             event.save()

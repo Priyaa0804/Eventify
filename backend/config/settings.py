@@ -105,3 +105,23 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
 }
+
+# --- Python 3.14 / Django 5.1 compatibility patch ---
+# Django 5.1 doesn't officially support Python 3.14; this fixes a known
+# admin-changelist crash (AttributeError: 'super' object has no attribute
+# 'dicts'). Official upstream fix: https://code.djangoproject.com/ticket/35844
+# (landed in Django 5.2, not backported to 5.1.x). Safe to delete once this
+# project upgrades to Django 5.2+.
+import sys
+if sys.version_info >= (3, 14):
+    from copy import copy
+    import django.template.context as _dj_context
+
+    def _py314_safe_copy(self):
+        duplicate = _dj_context.BaseContext()
+        duplicate.__class__ = self.__class__
+        duplicate.__dict__ = copy(self.__dict__)
+        duplicate.dicts = self.dicts[:]
+        return duplicate
+
+    _dj_context.BaseContext.__copy__ = _py314_safe_copy

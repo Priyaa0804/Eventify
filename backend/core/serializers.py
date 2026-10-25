@@ -6,19 +6,70 @@ from .notifications import notify
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
+    club = serializers.PrimaryKeyRelatedField(
+        queryset=Club.objects.all(), required=False, write_only=True
+    )
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'role', 'department']
+        fields = ['id', 'username', 'email', 'password', 'role', 'department', 'club']
+
+    def validate(self, data):
+        role = data.get('role')
+        club = data.get('club')
+
+        if role in ['FACULTY_ADVISOR', 'HOD']:
+            if not club:
+                raise serializers.ValidationError(
+                    {"club": "Club is required when registering as Faculty Advisor or HOD."}
+                )
+            if role == 'FACULTY_ADVISOR' and club.faculty_advisor and club.faculty_advisor.is_active:
+                raise serializers.ValidationError(
+                    {"club": f"This club already has a Faculty Advisor ({club.faculty_advisor.username}). "
+                             "Ask them to deactivate their account, then try registering again."}
+                )
+            if role == 'HOD' and club.hod and club.hod.is_active:
+                raise serializers.ValidationError(
+                    {"club": f"This club already has a HOD ({club.hod.username}). "
+                             "Ask them to deactivate their account, then try registering again."}
+                )
+        elif club:
+            raise serializers.ValidationError(
+                {"club": "Only Faculty Advisor or HOD registration should include a club."}
+            )
+
+        return data
 
     def create(self, validated_data):
+        club = validated_data.pop('club', None)
+        role = validated_data['role']
+        department = club.department if club else validated_data.get('department', '')
+
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data.get('email', ''),
             password=validated_data['password'],
-            role=validated_data['role'],
-            department=validated_data.get('department', ''),
+            role=role,
+            department=department,
         )
+
+        if club:
+            old_holder = club.faculty_advisor if role == 'FACULTY_ADVISOR' else club.hod
+
+            if role == 'FACULTY_ADVISOR':
+                club.faculty_advisor = user
+            else:
+                club.hod = user
+            club.save()
+
+            # Hand off any pending approvals stuck on the deactivated predecessor
+            if old_holder:
+                EventRequest.objects.filter(
+                    club=club,
+                    current_approver=old_holder,
+                    status__in=['PENDING_FACULTY', 'PENDING_HOD'],
+                ).update(current_approver=user)
+
         return user
 
 

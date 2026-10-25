@@ -1,4 +1,3 @@
-
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -15,10 +14,14 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.username} ({self.role})"
 
+
 class Club(models.Model):
     name = models.CharField(max_length=150)
     faculty_advisor = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='advised_clubs'
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='advised_clubs'
+    )
+    hod = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='headed_clubs'
     )
     department = models.CharField(max_length=100)
 
