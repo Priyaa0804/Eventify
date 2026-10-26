@@ -1,5 +1,7 @@
 
 from django.db import transaction
+from django.db.models import Q
+
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -11,6 +13,11 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
         min_length=8,
+    )
+
+    role = serializers.ChoiceField(
+        choices=User.ROLE_CHOICES,
+        required=True,
     )
 
     club = serializers.PrimaryKeyRelatedField(
@@ -26,36 +33,111 @@ class RegisterSerializer(serializers.ModelSerializer):
             'username',
             'email',
             'password',
+            'role',
             'department',
             'club',
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'department']
 
     def validate(self, data):
         club = data.get('club')
+        role = data.get('role')
 
         if not club:
             raise serializers.ValidationError({
                 'club': 'Please select a club.'
             })
 
-        # Public registrations can only create Student accounts.
-        data['role'] = 'STUDENT'
-        data['department'] = club.department
+        if role not in dict(User.ROLE_CHOICES):
+            raise serializers.ValidationError({
+                'role': 'Please select a valid role.'
+            })
+
+        if role == 'FACULTY_ADVISOR':
+            assigned_user = club.faculty_advisor
+
+        elif role == 'HOD':
+            assigned_user = club.hod
+
+        else:
+            assigned_user = None
+
+        if assigned_user and assigned_user.is_active:
+            raise serializers.ValidationError({
+                'role': (
+                    f'This club already has an active '
+                    f'{dict(User.ROLE_CHOICES)[role]}. '
+                    'Choose another club or contact your administrator.'
+                )
+            })
 
         return data
 
     @transaction.atomic
     def create(self, validated_data):
-        validated_data.pop('club')
+        club = validated_data.pop('club')
+        role = validated_data.pop('role')
+        password = validated_data.pop('password')
+
+        # Lock and refresh the club before checking its assignment.
+        club = Club.objects.select_for_update().get(pk=club.pk)
+
+        if role == 'FACULTY_ADVISOR':
+            old_user = club.faculty_advisor
+            role_field = 'faculty_advisor'
+            pending_status = 'PENDING_FACULTY'
+
+        elif role == 'HOD':
+            old_user = club.hod
+            role_field = 'hod'
+            pending_status = 'PENDING_HOD'
+
+        else:
+            old_user = None
+            role_field = None
+            pending_status = None
+
+        # Recheck inside the transaction to avoid duplicate assignment.
+        if old_user and old_user.is_active:
+            raise serializers.ValidationError({
+                'role': (
+                    'An active user is already assigned to this role '
+                    'for the selected club.'
+                )
+            })
 
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data.get('email', ''),
-            password=validated_data['password'],
-            role='STUDENT',
-            department=validated_data['department'],
+            password=password,
+            role=role,
+            department=club.department,
         )
+
+        if role_field:
+            # Assign the new staff account to the selected club.
+            setattr(club, role_field, user)
+            club.save(update_fields=[role_field])
+
+            # Preserve the approval stage and transfer pending requests
+            # from an inactive account, or assign previously unassigned
+            # requests for this club.
+            pending_requests = EventRequest.objects.filter(
+                club=club,
+                status=pending_status,
+            )
+
+            if old_user:
+                pending_requests = pending_requests.filter(
+                    Q(current_approver=old_user)
+                    | Q(current_approver__isnull=True)
+                )
+            else:
+                pending_requests = pending_requests.filter(
+                    current_approver__isnull=True
+                )
+
+            pending_requests.update(current_approver=user)
 
         return user
 

@@ -1,200 +1,70 @@
-
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import api from '../services/api';
-import './Register.css';
+import { CalendarDays, ArrowRight } from 'lucide-react';
+import { clubs, register } from '../services/api.js';
 
-function Register() {
-  const navigate = useNavigate();
+const roleOptions = [
+  { value: 'STUDENT', label: 'Student' },
+  { value: 'FACULTY_ADVISOR', label: 'Faculty Advisor' },
+  { value: 'HOD', label: 'HOD' },
+];
 
-  const [clubs, setClubs] = useState([]);
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    department: '',
-    club: '',
-  });
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function Register() {
+  const nav = useNavigate();
+  const [c, C] = useState([]);
+  const [f, F] = useState({ username: '', email: '', password: '', department: '', club: '', role: 'STUDENT' });
+  const [e, E] = useState('');
+  const [b, B] = useState(false);
+  const [clubError, ClubError] = useState('');
 
   useEffect(() => {
-    const fetchClubs = async () => {
-      try {
-        const response = await api.get('clubs/');
-        setClubs(Array.isArray(response.data) ? response.data : response.data.results || []);
-      } catch {
-        setError('Unable to load clubs. Please check that the backend is running.');
-      }
-    };
-
-    fetchClubs();
+    clubs().then(C).catch(() => ClubError('Could not load clubs. Start Django and try again.'));
   }, []);
 
-  const handleChange = (event) => {
+  function change(event) {
     const { name, value } = event.target;
-
-    setFormData((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-
     if (name === 'club') {
-      const selectedClub = clubs.find(
-        (item) => String(item.id) === value
-      );
-
-      setFormData((previous) => ({
-        ...previous,
-        club: value,
-        department: selectedClub?.department || '',
-      }));
+      const selected = c.find(club => String(club.id) === value);
+      F(current => ({ ...current, club: value, department: selected?.department || current.department }));
+    } else {
+      F(current => ({ ...current, [name]: value }));
     }
-  };
+    E('');
+  }
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    setError('');
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    if (formData.password.length < 8) {
-      setError('Password must contain at least 8 characters.');
-      return;
-    }
-
-    setLoading(true);
-
+  async function submit(event) {
+    event.preventDefault(); E(''); B(true);
     try {
-      await api.post('auth/register/', {
-        username: formData.username.trim(),
-        email: formData.email.trim(),
-        password: formData.password,
-        department: formData.department,
-        club: Number(formData.club),
-      });
+      const payload = {
+        username: f.username.trim(), email: f.email.trim(), password: f.password,
+        department: f.department.trim(), role: f.role,
+        club: f.club ? Number(f.club) : null,
+      };
+      await register(payload);
+      nav('/login', { state: { registered: true, role: f.role } });
+    } catch (error) {
+      const data = error.response?.data;
+      E(data ? Object.entries(data).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : value}`).join(' · ') : 'Registration failed. Check backend connection and role registration permissions.');
+    } finally { B(false); }
+  }
 
-      navigate('/login', {
-        state: {
-          message: 'Registration successful! Please log in.',
-        },
-      });
-    } catch (err) {
-      const data = err.response?.data;
-      const message = data
-        ? Object.entries(data)
-            .map(([field, messages]) =>
-              `${field}: ${Array.isArray(messages) ? messages.join(', ') : messages}`
-            )
-            .join(' ')
-        : 'Registration failed. Please check your backend connection.';
-
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="register-page">
-      <div className="register-card">
-        <div className="register-heading">
-          <h1>Create Account</h1>
-          <p>Join Eventify to manage and request campus events.</p>
-        </div>
-
-        {error && <div className="register-error">{error}</div>}
-
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="username">Username</label>
-          <input
-            id="username"
-            name="username"
-            value={formData.username}
-            onChange={handleChange}
-            placeholder="Choose a username"
-            autoComplete="username"
-            required
-          />
-
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            value={formData.email}
-            onChange={handleChange}
-            placeholder="Enter your email"
-            autoComplete="email"
-            required
-          />
-
-          <label htmlFor="club">Club</label>
-          <select
-            id="club"
-            name="club"
-            value={formData.club}
-            onChange={handleChange}
-            required
-          >
-            <option value="">Select your club</option>
-            {clubs.map((club) => (
-              <option key={club.id} value={club.id}>
-                {club.name} — {club.department}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="department">Department</label>
-          <input
-            id="department"
-            name="department"
-            value={formData.department}
-            placeholder="Select a club first"
-            readOnly
-            required
-          />
-
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            value={formData.password}
-            onChange={handleChange}
-            placeholder="At least 8 characters"
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
-
-          <label htmlFor="confirmPassword">Confirm Password</label>
-          <input
-            id="confirmPassword"
-            name="confirmPassword"
-            type="password"
-            value={formData.confirmPassword}
-            onChange={handleChange}
-            placeholder="Enter password again"
-            autoComplete="new-password"
-            required
-          />
-
-          <button type="submit" disabled={loading}>
-            {loading ? 'Creating Account...' : 'Create Account'}
-          </button>
-        </form>
-
-        <p className="register-login">
-          Already have an account? <Link to="/login">Login</Link>
-        </p>
-      </div>
-    </div>
-  );
+  const staffRole = f.role !== 'STUDENT';
+  return <main className="register-page">
+    <header><Link className="brand" to="/login"><CalendarDays/> eventify<span>.</span></Link><small>CAMPUS EVENT PORTAL</small></header>
+    <section className="register-card">
+      <div className="kicker">GET STARTED</div><h1>Create your account</h1><p className="muted">Choose your role and join your campus community.</p>
+      <form onSubmit={submit}>
+        <label>Register as<select name="role" value={f.role} onChange={change} required>{roleOptions.map(role => <option value={role.value} key={role.value}>{role.label}</option>)}</select></label>
+        {staffRole && <div className="hint">Faculty Advisor and HOD accounts must satisfy the server's club assignment and active-role rules. If your institution restricts staff registration, the backend may require an authorized invitation or administrator approval.</div>}
+        <div className="two"><label>Username<input name="username" value={f.username} onChange={change} minLength="3" required placeholder="e.g. priya123"/></label><label>Email address<input name="email" type="email" value={f.email} onChange={change} required placeholder="you@college.edu"/></label></div>
+        <label>Password<input name="password" type="password" value={f.password} onChange={change} minLength="8" required autoComplete="new-password" placeholder="At least 8 characters"/></label>
+        <label>Club<select name="club" value={f.club} onChange={change} required><option value="">Choose your club</option>{c.map(club=><option key={club.id} value={club.id}>{club.name}</option>)}</select></label>
+        <label>Department<input name="department" value={f.department} onChange={change} readOnly placeholder="Filled from your club"/></label>
+        {clubError && <div className="error">{clubError}</div>}
+        {e && <div className="error">{e}</div>}
+        <button className="primary full" disabled={b || !c.length}>{b?'Creating account…':'Create '+roleOptions.find(r=>r.value===f.role).label+' account'} <ArrowRight size={17}/></button>
+      </form>
+      <p className="switch">Already registered? <Link to="/login">Sign in</Link></p>
+    </section>
+  </main>;
 }
-
-export default Register;

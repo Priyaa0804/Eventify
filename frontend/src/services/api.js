@@ -1,77 +1,18 @@
-
-import axios from 'axios'
-
-const api = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api/',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-
-  return config
-})
-
-export async function loginUser(username, password) {
-  const response = await api.post('auth/login/', {
-    username,
-    password,
-  })
-
-  const accessToken = response.data.access
-
-  if (!accessToken) {
-    throw new Error('Login response did not contain an access token.')
-  }
-
-  localStorage.setItem('access_token', accessToken)
-
-  if (response.data.refresh) {
-    localStorage.setItem('refresh_token', response.data.refresh)
-  }
-
-  return response.data
-}
-
-export async function getCurrentUser() {
-  const response = await api.get('auth/me/')
-  return response.data
-}
-
-export function logoutUser() {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
-}
-
-export default api
-
-export async function getVenues() {
-  const response = await api.get('venues/')
-  return response.data
-}
-
-export async function getMyEvents() {
-  const response = await api.get('events/my/')
-  return response.data
-}
-
-export async function getPendingApprovals() {
-  const response = await api.get('approvals/pending/')
-  return response.data
-}
-
-export async function getCalendarEvents() {
-  const response = await api.get('calendar/events/')
-  return response.data
-}
-
-export async function getNotifications() {
-  const response = await api.get('notifications/')
-  return response.data
-}
+import axios from 'axios';
+const api=axios.create({baseURL:import.meta.env.VITE_API_BASE_URL||'http://127.0.0.1:8000/api/',headers:{'Content-Type':'application/json'}});
+api.interceptors.request.use(c=>{const t=localStorage.getItem('access_token');if(t)c.headers.Authorization=`Bearer ${t}`;return c});
+export const list=d=>Array.isArray(d)?d:(d?.results||d?.data||[]);
+export async function login(username,password){const {data}=await api.post('auth/login/',{username,password});if(!data.access)throw Error('No access token returned');localStorage.setItem('access_token',data.access);if(data.refresh)localStorage.setItem('refresh_token',data.refresh);return data}
+export const me=async()=>(await api.get('auth/me/')).data;
+export const register=async p=>(await api.post('auth/register/',p)).data;
+export const clubs=async()=>list((await api.get('clubs/')).data);
+export const venues=async()=>list((await api.get('venues/')).data);
+export const myEvents=async()=>list((await api.get('events/my/')).data);
+export const pending=async()=>list((await api.get('approvals/pending/')).data);
+export const calendar=async()=>list((await api.get('calendar/events/')).data);
+export const notifications=async()=>list((await api.get('notifications/')).data);
+export const createEvent=async p=>(await api.post('events/',p)).data;
+export const approve=async id=>(await api.post(`events/${id}/approve/`,{})).data;
+export const reject=async id=>(await api.post(`events/${id}/reject/`,{})).data;
+export function logout(){['access_token','refresh_token','current_user'].forEach(k=>localStorage.removeItem(k))}
+export default api;

@@ -1,395 +1,513 @@
 
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
   CalendarDays,
-  ClipboardList,
-  CheckCircle2,
+  LayoutDashboard,
   Bell,
   MapPin,
+  ShieldCheck,
   LogOut,
+  Plus,
   RefreshCw,
-  Menu,
+  Clock3,
+  Check,
   X,
-} from 'lucide-react'
+} from 'lucide-react';
+
 import {
-  getCurrentUser,
-  getVenues,
-  getMyEvents,
-  getPendingApprovals,
-  getCalendarEvents,
-  getNotifications,
-  logoutUser,
-} from '../services/api'
-import './Dashboard.css'
+  me,
+  myEvents,
+  pending,
+  venues,
+  calendar,
+  notifications,
+  approve,
+  reject,
+  logout,
+} from '../services/api.js';
 
-function getItems(data) {
-  if (Array.isArray(data)) return data
-  if (Array.isArray(data?.results)) return data.results
-  if (Array.isArray(data?.events)) return data.events
-  if (Array.isArray(data?.notifications)) return data.notifications
-  if (Array.isArray(data?.venues)) return data.venues
-  return []
-}
+const fmt = (value) => {
+  if (!value) return 'Not scheduled';
 
-function getEventTitle(event) {
-  return event.title || event.event_name || event.name || 'Untitled event'
-}
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
 
-function getEventDate(event) {
-  const value = event.event_date || event.date || event.start_date
-  if (!value) return 'Date not specified'
-
-  const date = new Date(value)
   return Number.isNaN(date.getTime())
-    ? String(value)
-    : date.toLocaleDateString()
-}
+    ? value
+    : date.toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+};
 
-function getStatus(event) {
-  return String(event.status || event.current_status || 'Pending')
+const fmtTime = (value) => {
+  if (!value) return 'Time unavailable';
+
+  const timePart = String(value).match(/T(\d{2}):(\d{2})/);
+
+  if (timePart) {
+    const hours = Number(timePart[1]);
+    const minutes = Number(timePart[2]);
+    const date = new Date();
+    date.setHours(hours, minutes, 0, 0);
+
+    return date.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  }
+
+  const plainTime = String(value).match(/^(\d{2}):(\d{2})/);
+
+  if (plainTime) {
+    const hours = Number(plainTime[1]);
+    const minutes = Number(plainTime[2]);
+    const date = new Date();
+    date.setHours(hours, minutes, 0, 0);
+
+    return date.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  }
+
+  return 'Time unavailable';
+};
+
+const pretty = (value) =>
+  String(value || 'pending')
     .replaceAll('_', ' ')
-}
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 
 export default function Dashboard() {
-  const navigate = useNavigate()
+  const nav = useNavigate();
+  const loc = useLocation();
+
   const [user, setUser] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem('current_user') || '{}')
+      return JSON.parse(localStorage.getItem('current_user') || '{}');
     } catch {
-      return {}
+      return {};
     }
-  })
-  const [events, setEvents] = useState([])
-  const [approvals, setApprovals] = useState([])
-  const [venues, setVenues] = useState([])
-  const [calendarEvents, setCalendarEvents] = useState([])
-  const [notifications, setNotifications] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [errors, setErrors] = useState([])
-  const [activeSection, setActiveSection] = useState('Overview')
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  });
 
-  async function loadDashboard() {
-    setLoading(true)
-    setErrors([])
+  const [events, setEvents] = useState([]);
+  const [approvals, setApprovals] = useState([]);
+  const [venueList, setVenueList] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [section, setSection] = useState('Overview');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState(loc.state?.notice || '');
+  const [busy, setBusy] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-    const requests = [
-      ['user', getCurrentUser],
-      ['events', getMyEvents],
-      ['approvals', getPendingApprovals],
-      ['venues', getVenues],
-      ['calendar', getCalendarEvents],
-      ['notifications', getNotifications],
-    ]
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
 
-    const results = await Promise.allSettled(
-      requests.map(([, request]) => request())
-    )
+    const results = await Promise.allSettled([
+      me(),
+      myEvents(),
+      pending(),
+      venues(),
+      calendar(),
+      notifications(),
+    ]);
 
-    const failed = []
+    if (results[0].status === 'fulfilled') {
+      setUser(results[0].value);
+      localStorage.setItem(
+        'current_user',
+        JSON.stringify(results[0].value)
+      );
+    } else if (results[0].reason?.response?.status === 401) {
+      logout();
+      nav('/login');
+      return;
+    }
 
-    results.forEach((result, index) => {
-      const key = requests[index][0]
+    if (results[1].status === 'fulfilled') {
+      setEvents(results[1].value);
+    }
 
-      if (result.status === 'rejected') {
-        failed.push(key)
-        return
-      }
+    if (results[2].status === 'fulfilled') {
+      setApprovals(results[2].value);
+    }
 
-      const data = result.value
+    if (results[3].status === 'fulfilled') {
+      setVenueList(results[3].value);
+    }
 
-      if (key === 'user') {
-        setUser(data)
-        localStorage.setItem('current_user', JSON.stringify(data))
-      } else if (key === 'events') {
-        setEvents(getItems(data))
-      } else if (key === 'approvals') {
-        setApprovals(getItems(data))
-      } else if (key === 'venues') {
-        setVenues(getItems(data))
-      } else if (key === 'calendar') {
-        setCalendarEvents(getItems(data))
-      } else if (key === 'notifications') {
-        setNotifications(getItems(data))
-      }
-    })
+    if (results[4].status === 'fulfilled') {
+      setCalendarEvents(results[4].value);
+    }
 
-    setErrors(failed)
-    setLoading(false)
-  }
+    if (results[5].status === 'fulfilled') {
+      setNotes(results[5].value);
+    }
+
+    if (results.every((result) => result.status === 'rejected')) {
+      setError(
+        'Could not reach Django. Start the backend at 127.0.0.1:8000 and sign in again.'
+      );
+    }
+
+    setLoading(false);
+  }, [nav]);
 
   useEffect(() => {
-    loadDashboard()
-  }, [])
+    load();
+  }, [load]);
 
-  function handleLogout() {
-    logoutUser()
-    localStorage.removeItem('current_user')
-    navigate('/login', { replace: true })
+  const role = String(user.role || 'STUDENT').toUpperCase();
+  const canApprove = ['FACULTY_ADVISOR', 'HOD'].includes(role);
+
+  const navItems = [
+    ['Overview', LayoutDashboard],
+    ['My Events', CalendarDays],
+    ...(canApprove ? [['Approvals', ShieldCheck]] : []),
+    ['Calendar', Clock3],
+    ['Venues', MapPin],
+    ['Notifications', Bell],
+  ];
+
+  async function decide(id, kind) {
+    setBusy(id);
+    setError('');
+
+    try {
+      if (kind === 'approve') {
+        await approve(id);
+      } else {
+        await reject(id);
+      }
+
+      setNotice(
+        `Request ${kind === 'approve' ? 'approved' : 'rejected'}.`
+      );
+
+      await load();
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+          'Action failed. Check the account role and approval assignment.'
+      );
+    } finally {
+      setBusy(null);
+    }
   }
 
-  const role = String(user.role || (user.is_superuser ? 'Administrator' : 'User'))
-    .replaceAll('_', ' ')
-
-  const navigation = [
-    { label: 'Overview', icon: LayoutDashboard },
-    { label: 'My Events', icon: ClipboardList },
-    { label: 'Approvals', icon: CheckCircle2 },
-    { label: 'Calendar', icon: CalendarDays },
-    { label: 'Venues', icon: MapPin },
-    { label: 'Notifications', icon: Bell },
-  ]
-
-  function renderSection() {
-    if (activeSection === 'Overview') {
-      return (
-        <>
-          <div className="dashboard-welcome">
-            <div>
-              <p className="dashboard-eyebrow">EVENT MANAGEMENT PORTAL</p>
-              <h1>Welcome back{user.username ? `, ${user.username}` : ''}</h1>
-              <p>Here is an overview of your event management workspace.</p>
-            </div>
-            <button className="dashboard-refresh" onClick={loadDashboard}>
-              <RefreshCw size={16} />
-              Refresh
-            </button>
-          </div>
-
-          <div className="dashboard-stats">
-            <article className="dashboard-stat">
-              <span className="stat-icon"><ClipboardList size={20} /></span>
-              <p>My event requests</p>
-              <strong>{events.length}</strong>
-              <span>Requests returned by the server</span>
-            </article>
-            <article className="dashboard-stat">
-              <span className="stat-icon"><CheckCircle2 size={20} /></span>
-              <p>Pending approvals</p>
-              <strong>{approvals.length}</strong>
-              <span>Items awaiting approval</span>
-            </article>
-            <article className="dashboard-stat">
-              <span className="stat-icon"><CalendarDays size={20} /></span>
-              <p>Calendar events</p>
-              <strong>{calendarEvents.length}</strong>
-              <span>Events returned by the calendar API</span>
-            </article>
-            <article className="dashboard-stat">
-              <span className="stat-icon"><Bell size={20} /></span>
-              <p>Notifications</p>
-              <strong>{notifications.length}</strong>
-              <span>Notifications returned by the server</span>
-            </article>
-          </div>
-
-          {errors.length > 0 && (
-            <div className="dashboard-warning" role="status">
-              Some data could not be loaded: {errors.join(', ')}.
-              Your account may not have permission to access every endpoint.
-              <button onClick={loadDashboard}>Try again</button>
-            </div>
-          )}
-
-          <section className="dashboard-panel">
-            <div className="dashboard-panel-heading">
-              <div>
-                <h2>My event requests</h2>
-                <p>Your latest requests from the backend</p>
-              </div>
-              <button className="dashboard-text-button" onClick={() => setActiveSection('My Events')}>
-                View all
-              </button>
-            </div>
-            <EventList events={events.slice(0, 5)} loading={loading} />
-          </section>
-
-          <section className="dashboard-panel">
-            <div className="dashboard-panel-heading">
-              <div>
-                <h2>Pending approvals</h2>
-                <p>Requests returned by the approvals API</p>
-              </div>
-              <button className="dashboard-text-button" onClick={() => setActiveSection('Approvals')}>
-                View all
-              </button>
-            </div>
-            <EventList events={approvals.slice(0, 5)} loading={loading} />
-          </section>
-        </>
-      )
-    }
-
-    if (activeSection === 'My Events') {
-      return <DataSection title="My Events" description="Your event requests." events={events} loading={loading} />
-    }
-
-    if (activeSection === 'Approvals') {
-      return <DataSection title="Approvals" description="Pending event requests available to your account." events={approvals} loading={loading} />
-    }
-
-    if (activeSection === 'Calendar') {
-      return <DataSection title="Calendar Events" description="Events returned by the calendar API." events={calendarEvents} loading={loading} />
-    }
-
-    if (activeSection === 'Venues') {
-      return (
-        <section className="dashboard-panel">
-          <div className="dashboard-panel-heading">
-            <div>
-              <h2>Venues</h2>
-              <p>Venues returned by the backend</p>
-            </div>
-          </div>
-          {loading ? <p className="dashboard-empty">Loading venues...</p> :
-            venues.length === 0 ? <p className="dashboard-empty">No venues were returned by the API.</p> :
-              <div className="dashboard-data-list">
-                {venues.map((venue, index) => (
-                  <article className="dashboard-data-row" key={venue.id || index}>
-                    <span className="event-list-icon"><MapPin size={18} /></span>
-                    <div className="event-list-main">
-                      <strong>{venue.name || venue.venue_name || `Venue ${index + 1}`}</strong>
-                      <p>{venue.location || venue.building || venue.description || 'Venue details not provided'}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>}
-        </section>
-      )
-    }
-
-    return (
-      <section className="dashboard-panel">
-        <div className="dashboard-panel-heading">
-          <div>
-            <h2>Notifications</h2>
-            <p>Notifications returned by the backend</p>
-          </div>
-        </div>
-        {loading ? <p className="dashboard-empty">Loading notifications...</p> :
-          notifications.length === 0 ? <p className="dashboard-empty">No notifications were returned by the API.</p> :
-            <div className="dashboard-data-list">
-              {notifications.map((item, index) => (
-                <article className="dashboard-data-row" key={item.id || index}>
-                  <span className="event-list-icon"><Bell size={18} /></span>
-                  <div className="event-list-main">
-                    <strong>{item.title || item.message || item.description || 'Notification'}</strong>
-                    <p>{item.created_at ? new Date(item.created_at).toLocaleString() : 'Date not provided'}</p>
-                  </div>
-                </article>
-              ))}
-            </div>}
-      </section>
-    )
+  function signout() {
+    logout();
+    nav('/login');
   }
 
   return (
-    <div className="dashboard-layout">
-      {mobileMenuOpen && (
-        <button className="dashboard-mobile-backdrop" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)} />
-      )}
+    <div className="dashboard">
+      <aside className="sidebar">
+        <Link className="brand" to="/dashboard">
+          <CalendarDays /> eventify<span>.</span>
+        </Link>
 
-      <aside className={`dashboard-sidebar ${mobileMenuOpen ? 'dashboard-sidebar-open' : ''}`}>
-        <div className="dashboard-brand-row">
-          <div className="dashboard-brand-mark">E</div>
-          <span className="dashboard-brand-name">Eventify</span>
-          <button className="dashboard-close-menu" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}>
-            <X size={20} />
+        <small>WORKSPACE</small>
+
+        {navItems.map(([name, Icon]) => (
+          <button
+            className={section === name ? 'nav active' : 'nav'}
+            key={name}
+            onClick={() => setSection(name)}
+          >
+            <Icon size={18} />
+            {name}
+            {name === 'Approvals' && approvals.length > 0 && (
+              <b>{approvals.length}</b>
+            )}
           </button>
-        </div>
+        ))}
 
-        <p className="dashboard-nav-label">WORKSPACE</p>
-        <nav className="dashboard-nav">
-          {navigation.map(({ label, icon: Icon }) => (
-            <button
-              key={label}
-              className={`dashboard-nav-item ${activeSection === label ? 'active' : ''}`}
-              onClick={() => {
-                setActiveSection(label)
-                setMobileMenuOpen(false)
-              }}
-            >
-              <Icon size={18} />
-              <span>{label}</span>
-              {label === 'Notifications' && notifications.length > 0 && (
-                <span className="dashboard-nav-count">{notifications.length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-
-        <div className="dashboard-sidebar-bottom">
-          <div className="dashboard-user">
-            <div className="dashboard-avatar">
-              {(user.username || 'U').slice(0, 1).toUpperCase()}
-            </div>
-            <div className="dashboard-user-info">
-              <strong>{user.username || 'Logged-in user'}</strong>
-              <span>{role}</span>
+        <div className="side-bottom">
+          <div className="user">
+            <span>{(user.username || 'U')[0].toUpperCase()}</span>
+            <div>
+              <strong>{user.username || 'Campus user'}</strong>
+              <small>{pretty(role)}</small>
             </div>
           </div>
-          <button className="dashboard-logout" onClick={handleLogout}>
-            <LogOut size={17} />
-            Sign out
+
+          <button className="nav" onClick={signout}>
+            <LogOut size={18} /> Sign out
           </button>
         </div>
       </aside>
 
-      <main className="dashboard-main">
-        <header className="dashboard-topbar">
-          <button className="dashboard-open-menu" aria-label="Open menu" onClick={() => setMobileMenuOpen(true)}>
-            <Menu size={21} />
-          </button>
-          <span className="dashboard-breadcrumb">Workspace / <strong>{activeSection}</strong></span>
-          <div className="dashboard-topbar-actions">
-            <span className="dashboard-role-label">{role}</span>
-            <button className="dashboard-icon-button" aria-label="Notifications" onClick={() => setActiveSection('Notifications')}>
-              <Bell size={19} />
-              {notifications.length > 0 && <i />}
+      <main className="main">
+        <header className="topbar">
+          <span>
+            Workspace / <b>{section}</b>
+          </span>
+
+          <div>
+            <span className="live">● Local API</span>
+            <button className="round" onClick={load} title="Refresh">
+              <RefreshCw size={17} />
             </button>
           </div>
         </header>
 
-        <div className="dashboard-content">
-          {renderSection()}
+        <div className="content">
+          {notice && (
+            <div className="success">
+              {notice}
+              <button onClick={() => setNotice('')}>×</button>
+            </div>
+          )}
+
+          {error && <div className="error">{error}</div>}
+
+          <div className="heading">
+            <div>
+              <small className="kicker">EVENTIFY CAMPUS PORTAL</small>
+              <h1>
+                {section === 'Overview'
+                  ? `Welcome back${user.username ? `, ${user.username}` : ''}`
+                  : section}
+              </h1>
+              <p className="muted">
+                Your plans, people and progress — all in one place.
+              </p>
+            </div>
+
+            {!['Approvals', 'Notifications'].includes(section) && (
+              <Link className="primary" to="/create-event">
+                <Plus size={17} /> Create event
+              </Link>
+            )}
+          </div>
+
+          {section === 'Overview' && (
+            <>
+              <div className="stats">
+                <Stat label="My event requests" n={events.length} icon={CalendarDays} />
+                <Stat label="Awaiting review" n={approvals.length} icon={ShieldCheck} />
+                <Stat label="Available venues" n={venueList.length} icon={MapPin} />
+                <Stat label="Notifications" n={notes.length} icon={Bell} />
+              </div>
+
+              <div className="panels">
+                <Panel title="Recent event requests" action={() => setSection('My Events')}>
+                  {loading ? (
+                    <Loading />
+                  ) : events.length ? (
+                    events.slice(0, 5).map((event) => (
+                      <Event key={event.id} e={event} />
+                    ))
+                  ) : (
+                    <Empty text="No event requests yet. Create your first campus event." />
+                  )}
+                </Panel>
+
+                <Panel title="Recent notifications" action={() => setSection('Notifications')}>
+                  {loading ? (
+                    <Loading />
+                  ) : notes.length ? (
+                    notes.slice(0, 5).map((note) => (
+                      <div className="note" key={note.id}>
+                        <b>{note.title || note.event_name || 'Event update'}</b>
+                        <p>{note.message || 'There is an update on your request.'}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <Empty text="You are all caught up." />
+                  )}
+                </Panel>
+              </div>
+            </>
+          )}
+
+          {section === 'My Events' && (
+            <Panel title="All my event requests">
+              {loading ? (
+                <Loading />
+              ) : events.length ? (
+                events.map((event) => <Event key={event.id} e={event} />)
+              ) : (
+                <Empty text="No requests yet. Create an event to get started." />
+              )}
+            </Panel>
+          )}
+
+          {section === 'Approvals' && (
+            <Panel title="Requests needing review">
+              {loading ? (
+                <Loading />
+              ) : approvals.length ? (
+                approvals.map((event) => (
+                  <article className="approval" key={event.id}>
+                    <div>
+                      <h3>{event.event_name}</h3>
+                      <p>{event.description || 'No description provided'}</p>
+                      <small>
+                        {fmt(event.event_date)} · {pretty(event.status)}
+                      </small>
+                      <small style={{ display: 'block', marginTop: '5px' }}>
+                        <Clock3 size={13} style={{ verticalAlign: 'middle', marginRight: '5px' }} />
+                        {event.start_time?.slice(0, 5) || 'Time TBD'} – {event.end_time?.slice(0, 5) || 'Time TBD'}
+                      </small>
+                    </div>
+
+                    <div className="actions">
+                      <button
+                        className="primary"
+                        disabled={busy === event.id}
+                        onClick={() => decide(event.id, 'approve')}
+                      >
+                        <Check size={15} /> Approve
+                      </button>
+
+                      <button
+                        className="reject"
+                        disabled={busy === event.id}
+                        onClick={() => decide(event.id, 'reject')}
+                      >
+                        <X size={15} /> Reject
+                      </button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <Empty text="No approval requests assigned to this account." />
+              )}
+            </Panel>
+          )}
+
+          {section === 'Calendar' && (
+            <Panel title="Scheduled events">
+              {loading ? (
+                <Loading />
+              ) : calendarEvents.length ? (
+                calendarEvents.map((event, index) => (
+                  <div className="row" key={event.id ?? index}>
+                    <CalendarDays size={18} />
+
+                    <div>
+                      <b>{event.title || event.event_name || 'Campus event'}</b>
+
+                      <small>
+                        {fmt(event.start || event.event_date)}
+                      </small>
+
+                      <small style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '5px' }}>
+                        <Clock3 size={14} />
+                        {event.start && event.end
+                          ? `${fmtTime(event.start)} – ${fmtTime(event.end)}`
+                          : event.start_time && event.end_time
+                            ? `${fmtTime(event.start_time)} – ${fmtTime(event.end_time)}`
+                            : 'Timing unavailable'}
+                      </small>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <Empty text="Approved calendar events will appear here." />
+              )}
+            </Panel>
+          )}
+
+          {section === 'Venues' && (
+            <Panel title="Campus venues">
+              <div className="venue-grid">
+                {venueList.map((venue) => (
+                  <div className="venue" key={venue.id}>
+                    <MapPin />
+                    <h3>{venue.name}</h3>
+                    <p>{venue.location || 'Campus location'}</p>
+                    <small>Capacity: {venue.capacity}</small>
+                  </div>
+                ))}
+              </div>
+
+              {!venueList.length && (
+                <Empty text="No venues returned by the API." />
+              )}
+            </Panel>
+          )}
+
+          {section === 'Notifications' && (
+            <Panel title="Notifications">
+              {notes.length ? (
+                notes.map((note) => (
+                  <div className="note" key={note.id}>
+                    <b>{note.title || note.event_name || 'Event update'}</b>
+                    <p>{note.message || 'There is an update on your event.'}</p>
+                    <small>
+                      {note.sent_at
+                        ? new Date(note.sent_at).toLocaleString()
+                        : 'Recent'}
+                    </small>
+                  </div>
+                ))
+              ) : (
+                <Empty text="No notifications yet." />
+              )}
+            </Panel>
+          )}
+
+          <footer>
+            © {new Date().getFullYear()} Eventify · Campus event management
+          </footer>
         </div>
       </main>
     </div>
-  )
+  );
 }
 
-function EventList({ events, loading }) {
-  if (loading) return <p className="dashboard-empty">Loading data from the backend...</p>
-  if (events.length === 0) return <p className="dashboard-empty">No records were returned by the API.</p>
-
+function Stat({ label, n, icon: Icon }) {
   return (
-    <div className="dashboard-data-list">
-      {events.map((event, index) => (
-        <article className="dashboard-data-row" key={event.id || index}>
-          <span className="event-list-icon"><CalendarDays size={18} /></span>
-          <div className="event-list-main">
-            <strong>{getEventTitle(event)}</strong>
-            <p>{getEventDate(event)}</p>
-          </div>
-          <span className="event-status">{getStatus(event)}</span>
-        </article>
-      ))}
-    </div>
-  )
+    <article className="stat">
+      <span><Icon size={19} /></span>
+      <small>{label}</small>
+      <strong>{n}</strong>
+    </article>
+  );
 }
 
-function DataSection({ title, description, events, loading }) {
+function Panel({ title, children, action }) {
   return (
-    <section className="dashboard-panel dashboard-full-panel">
-      <div className="dashboard-panel-heading">
-        <div>
-          <h2>{title}</h2>
-          <p>{description}</p>
-        </div>
+    <section className="panel">
+      <div className="panel-head">
+        <h2>{title}</h2>
+        {action && <button onClick={action}>View all →</button>}
       </div>
-      <EventList events={events} loading={loading} />
+      {children}
     </section>
-  )
+  );
+}
+
+function Event({ e }) {
+  return (
+    <div className="row">
+      <span className="event-icon"><CalendarDays size={18} /></span>
+      <div>
+        <b>{e.event_name || 'Campus event'}</b>
+        <small>
+          {fmt(e.event_date)} · {e.start_time?.slice(0, 5) || 'Time TBD'} – {e.end_time?.slice(0, 5) || 'Time TBD'}
+        </small>
+      </div>
+      <span className={`status ${String(e.status || 'pending').toLowerCase()}`}>
+        {pretty(e.status)}
+      </span>
+    </div>
+  );
+}
+
+function Empty({ text }) {
+  return <div className="empty">{text}</div>;
+}
+
+function Loading() {
+  return <div className="empty">Loading your workspace…</div>;
 }

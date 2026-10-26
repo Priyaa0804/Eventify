@@ -45,3 +45,6 @@ backend (2).zip
 *.sln
 *.sw?
 Thumbs.db
+
+# Backup files
+*.bak
