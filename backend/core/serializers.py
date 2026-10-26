@@ -1,74 +1,61 @@
+
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Venue, EventRequest, Club
+
+from .models import User, Venue, EventRequest, Club, Notification
 from .notifications import notify
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+    )
+
     club = serializers.PrimaryKeyRelatedField(
-        queryset=Club.objects.all(), required=False, write_only=True
+        queryset=Club.objects.all(),
+        required=True,
+        write_only=True,
     )
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'role', 'department', 'club']
+        fields = [
+            'id',
+            'username',
+            'email',
+            'password',
+            'department',
+            'club',
+        ]
+        read_only_fields = ['id']
 
     def validate(self, data):
-        role = data.get('role')
         club = data.get('club')
 
-        if role in ['FACULTY_ADVISOR', 'HOD']:
-            if not club:
-                raise serializers.ValidationError(
-                    {"club": "Club is required when registering as Faculty Advisor or HOD."}
-                )
-            if role == 'FACULTY_ADVISOR' and club.faculty_advisor and club.faculty_advisor.is_active:
-                raise serializers.ValidationError(
-                    {"club": f"This club already has a Faculty Advisor ({club.faculty_advisor.username}). "
-                             "Ask them to deactivate their account, then try registering again."}
-                )
-            if role == 'HOD' and club.hod and club.hod.is_active:
-                raise serializers.ValidationError(
-                    {"club": f"This club already has a HOD ({club.hod.username}). "
-                             "Ask them to deactivate their account, then try registering again."}
-                )
-        elif club:
-            raise serializers.ValidationError(
-                {"club": "Only Faculty Advisor or HOD registration should include a club."}
-            )
+        if not club:
+            raise serializers.ValidationError({
+                'club': 'Please select a club.'
+            })
+
+        # Public registrations can only create Student accounts.
+        data['role'] = 'STUDENT'
+        data['department'] = club.department
 
         return data
 
+    @transaction.atomic
     def create(self, validated_data):
-        club = validated_data.pop('club', None)
-        role = validated_data['role']
-        department = club.department if club else validated_data.get('department', '')
+        validated_data.pop('club')
 
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data.get('email', ''),
             password=validated_data['password'],
-            role=role,
-            department=department,
+            role='STUDENT',
+            department=validated_data['department'],
         )
-
-        if club:
-            old_holder = club.faculty_advisor if role == 'FACULTY_ADVISOR' else club.hod
-
-            if role == 'FACULTY_ADVISOR':
-                club.faculty_advisor = user
-            else:
-                club.hod = user
-            club.save()
-
-            # Hand off any pending approvals stuck on the deactivated predecessor
-            if old_holder:
-                EventRequest.objects.filter(
-                    club=club,
-                    current_approver=old_holder,
-                    status__in=['PENDING_FACULTY', 'PENDING_HOD'],
-                ).update(current_approver=user)
 
         return user
 
@@ -85,69 +72,128 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'role', 'department']
+        fields = [
+            'id',
+            'username',
+            'email',
+            'role',
+            'department',
+        ]
+
+
+class ClubSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Club
+        fields = ['id', 'name', 'department']
 
 
 class VenueSerializer(serializers.ModelSerializer):
     class Meta:
         model = Venue
-        fields = ['id', 'name', 'capacity', 'location', 'is_active']
+        fields = [
+            'id',
+            'name',
+            'capacity',
+            'location',
+            'is_active',
+        ]
 
 
 class EventRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = EventRequest
         fields = [
-            'id', 'club', 'event_name', 'description', 'venue',
-            'event_date', 'start_time', 'end_time',
-            'expected_participants', 'additional_requirements',
-            'status', 'current_approver', 'created_at',
+            'id',
+            'club',
+            'event_name',
+            'description',
+            'venue',
+            'event_date',
+            'start_time',
+            'end_time',
+            'expected_participants',
+            'additional_requirements',
+            'status',
+            'current_approver',
+            'created_at',
         ]
-        read_only_fields = ['status', 'current_approver', 'created_at']
+        read_only_fields = [
+            'status',
+            'current_approver',
+            'created_at',
+        ]
 
     def validate(self, data):
-        start_time = data['start_time']
-        end_time = data['end_time']
+        venue = data.get('venue')
+        event_date = data.get('event_date')
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
 
-        if end_time <= start_time:
-            raise serializers.ValidationError("End time must be after start time.")
+        if start_time is not None and end_time is not None:
+            if end_time <= start_time:
+                raise serializers.ValidationError({
+                    'end_time': 'End time must be after start time.'
+                })
 
-        conflict_exists = EventRequest.objects.filter(
-            venue=data['venue'],
-            event_date=data['event_date'],
-        ).exclude(
-            status__in=['REJECTED', 'CANCELLED']
-        ).filter(
-            start_time__lt=end_time,
-            end_time__gt=start_time
-        ).exists()
+        if venue is not None and not venue.is_active:
+            raise serializers.ValidationError({
+                'venue': 'This venue is inactive and cannot be booked.'
+            })
 
-        if conflict_exists:
-            raise serializers.ValidationError(
-                "This venue is already booked or requested for an overlapping time slot."
-            )
+        if (
+            venue is not None
+            and event_date is not None
+            and start_time is not None
+            and end_time is not None
+        ):
+            conflict_exists = EventRequest.objects.filter(
+                venue=venue,
+                event_date=event_date,
+                start_time__lt=end_time,
+                end_time__gt=start_time,
+            ).exclude(
+                status__in=['REJECTED', 'CANCELLED']
+            ).exists()
+
+            if conflict_exists:
+                raise serializers.ValidationError({
+                    'non_field_errors': [
+                        'This venue is already booked or requested '
+                        'for an overlapping time slot.'
+                    ]
+                })
 
         return data
 
     def create(self, validated_data):
         club = validated_data['club']
+
         event_request = EventRequest.objects.create(
             **validated_data,
             requested_by=self.context['request'].user,
             status='PENDING_FACULTY',
             current_approver=club.faculty_advisor,
         )
-        notify(
-            club.faculty_advisor, event_request,
-            f"New event request: {event_request.event_name}",
-            f"{event_request.requested_by.username} submitted '{event_request.event_name}' "
-            f"for {event_request.venue.name} on {event_request.event_date}. Please review."
-        )
+
+        if club.faculty_advisor:
+            notify(
+                club.faculty_advisor,
+                event_request,
+                f'New event request: {event_request.event_name}',
+                f'{event_request.requested_by.username} submitted '
+                f"'{event_request.event_name}' for "
+                f'{event_request.venue.name} on '
+                f'{event_request.event_date}. Please review.',
+            )
+
         return event_request
 
 
 class ApprovalActionSerializer(serializers.Serializer):
-    comment = serializers.CharField(required=False, allow_blank=True)
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
 
 
 class CalendarEventSerializer(serializers.ModelSerializer):
@@ -157,13 +203,37 @@ class CalendarEventSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EventRequest
-        fields = ['title', 'start', 'end']
+        fields = [
+            'title',
+            'start',
+            'end',
+        ]
 
     def get_title(self, obj):
-        return f"{obj.event_name} — {obj.venue.name}"
+        return f'{obj.event_name} — {obj.venue.name}'
 
     def get_start(self, obj):
-        return f"{obj.event_date}T{obj.start_time}"
+        return f'{obj.event_date}T{obj.start_time}'
 
     def get_end(self, obj):
-        return f"{obj.event_date}T{obj.end_time}"
+        return f'{obj.event_date}T{obj.end_time}'
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    event_name = serializers.CharField(
+        source='event_request.event_name',
+        read_only=True,
+    )
+
+    class Meta:
+        model = Notification
+        fields = [
+            'id',
+            'event_request',
+            'event_name',
+            'message',
+            'sent_status',
+            'is_read',
+            'sent_at',
+        ]
+        read_only_fields = fields

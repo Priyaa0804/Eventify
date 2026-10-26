@@ -1,0 +1,140 @@
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #191919;
+  color: #f5f5f5;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 430px;
+  padding: 38px;
+  border: 1px solid #3d3d3d;
+  border-radius: 14px;
+  background: #242424;
+  box-sizing: border-box;
+}
+
+.login-brand {
+  margin-bottom: 32px;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.login-eyebrow {
+  color: #aaa;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+}
+
+.login-card h1 {
+  margin: 12px 0 8px;
+  font-size: 30px;
+}
+
+.login-subtitle {
+  margin-bottom: 28px;
+  color: #bdbdbd;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.login-card form {
+  display: grid;
+  gap: 10px;
+}
+
+.login-card label {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.login-card input {
+  width: 100%;
+  min-height: 45px;
+  padding: 12px;
+  border: 1px solid #494949;
+  border-radius: 8px;
+  outline: none;
+  background: #1b1b1b;
+  color: white;
+  box-sizing: border-box;
+}
+
+.login-card input:focus {
+  border-color: #aaa;
+}
+
+.login-card form button {
+  min-height: 46px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #f5f5f5;
+  color: #171717;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.login-card form button:hover {
+  opacity: 0.85;
+}
+
+.login-card form button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.login-error {
+  margin: 8px 0 0;
+  color: #ff8585;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.login-success {
+  margin: 0 0 18px;
+  padding: 12px;
+  border: 1px solid #276749;
+  border-radius: 8px;
+  background: #173b2b;
+  color: #9ae6b4;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.login-register {
+  margin: 22px 0 0;
+  color: #bdbdbd;
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-register a {
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.login-register a:hover {
+  color: #c4b5fd;
+}
+
+.login-footer {
+  margin: 26px 0 0;
+  color: #999;
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 26px 21px;
+  }
+}

@@ -1,3 +1,4 @@
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -8,6 +9,7 @@ class User(AbstractUser):
         ('FACULTY_ADVISOR', 'Faculty Advisor'),
         ('HOD', 'Head of Department'),
     ]
+
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     department = models.CharField(max_length=100, blank=True)
 
@@ -17,12 +19,23 @@ class User(AbstractUser):
 
 class Club(models.Model):
     name = models.CharField(max_length=150)
-    faculty_advisor = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='advised_clubs'
+
+    faculty_advisor = models.OneToOneField(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='advised_club',
     )
-    hod = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='headed_clubs'
+
+    hod = models.OneToOneField(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='headed_club',
     )
+
     department = models.CharField(max_length=100)
 
     def __str__(self):
@@ -34,7 +47,11 @@ class Venue(models.Model):
     capacity = models.IntegerField()
     location = models.CharField(max_length=200, blank=True)
     is_active = models.BooleanField(default=True)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE)
+
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+    )
 
     def __str__(self):
         return self.name
@@ -49,22 +66,50 @@ class EventRequest(models.Model):
         ('CANCELLED', 'Cancelled'),
     ]
 
-    club = models.ForeignKey(Club, on_delete=models.CASCADE)
-    requested_by = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='event_requests'
+    club = models.ForeignKey(
+        Club,
+        on_delete=models.CASCADE,
     )
+
+    requested_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='event_requests',
+    )
+
     event_name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    venue = models.ForeignKey(Venue, on_delete=models.CASCADE)
+
+    venue = models.ForeignKey(
+        Venue,
+        on_delete=models.CASCADE,
+    )
+
     event_date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()
-    expected_participants = models.IntegerField(null=True, blank=True)
-    additional_requirements = models.TextField(blank=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING_FACULTY')
-    current_approver = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='pending_approvals'
+
+    expected_participants = models.IntegerField(
+        null=True,
+        blank=True,
     )
+
+    additional_requirements = models.TextField(blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='PENDING_FACULTY',
+    )
+
+    current_approver = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pending_approvals',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -73,27 +118,78 @@ class EventRequest(models.Model):
 
 
 class Approval(models.Model):
-    STAGE_CHOICES = [('FACULTY', 'Faculty Advisor'), ('HOD', 'HOD')]
-    ACTION_CHOICES = [('APPROVED', 'Approved'), ('REJECTED', 'Rejected')]
+    STAGE_CHOICES = [
+        ('FACULTY', 'Faculty Advisor'),
+        ('HOD', 'HOD'),
+    ]
+
+    ACTION_CHOICES = [
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    ]
 
     event_request = models.ForeignKey(
-        EventRequest, on_delete=models.CASCADE, related_name='approvals'
+        EventRequest,
+        on_delete=models.CASCADE,
+        related_name='approvals',
     )
-    approver = models.ForeignKey(User, on_delete=models.CASCADE)
-    stage = models.CharField(max_length=10, choices=STAGE_CHOICES)
-    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+
+    approver = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+    )
+
+    stage = models.CharField(
+        max_length=10,
+        choices=STAGE_CHOICES,
+    )
+
+    action = models.CharField(
+        max_length=10,
+        choices=ACTION_CHOICES,
+    )
+
     comment = models.TextField(blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.event_request.event_name} - {self.stage} - {self.action}"
+        return (
+            f"{self.event_request.event_name} - "
+            f"{self.stage} - {self.action}"
+        )
 
 
 class Notification(models.Model):
-    STATUS_CHOICES = [('SENT', 'Sent'), ('FAILED', 'Failed')]
+    STATUS_CHOICES = [
+        ('SENT', 'Sent'),
+        ('FAILED', 'Failed'),
+    ]
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    event_request = models.ForeignKey(EventRequest, on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+    )
+
+    event_request = models.ForeignKey(
+        EventRequest,
+        on_delete=models.CASCADE,
+    )
+
     message = models.TextField()
-    sent_status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+
+    sent_status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+    )
+
+    is_read = models.BooleanField(default=False)
     sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-sent_at']
+
+    def __str__(self):
+        return (
+            f"Notification for {self.user.username}: "
+            f"{self.message[:50]}"
+        )

@@ -1,0 +1,47 @@
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node.js / Vite
+node_modules/
+frontend/node_modules/
+dist/
+dist-ssr/
+frontend/dist/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+!.env.example.*
+
+# Django database
+backend/db.sqlite3
+
+# ZIP backups
+backend.zip
+backend (2).zip
+
+# Editor and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
